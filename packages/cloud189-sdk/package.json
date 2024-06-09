@@ -1,0 +1,29 @@
+{
+  "name": "@netdisk-sdk/cloud189-sdk",
+  "version": "1.0.0",
+  "description": "",
+  "source": "src/index.ts",
+  "main": "dist/index.cjs.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "watch": "parcel watch",
+    "build": "parcel build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/jsrsasign": "^10.5.14",
+    "@types/node": "^20.14.0",
+    "@types/uuid": "^9.0.8",
+    "parcel": "^2.12.0"
+  },
+  "dependencies": {
+    "@netdisk-sdk/utils": "workspace:^",
+    "axios": "^1.7.2",
+    "err-code": "^3.0.1",
+    "superagent": "^9.0.2"
+  }
+}
