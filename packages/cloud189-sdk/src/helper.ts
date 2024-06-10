@@ -1,7 +1,9 @@
-import { Method } from "@netdisk-sdk/utils";
+import { Check, Method } from "@netdisk-sdk/utils";
 
 import Crypto from "crypto";
 import { Buffer } from "buffer";
+import { ICloud189ApiResult, ICloud189AuthApiResult } from "./types";
+import superagent from "superagent";
 
 export const rsaEncrypt = (publicKey: string, origData: string | Uint8Array) => {
 
@@ -75,3 +77,13 @@ export const formatDate = (date: Date) => {
 }
 
 export const sleep = (ms?: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
+export const isICloud189ApiResult = (result: any): result is ICloud189ApiResult => {
+    return Check.isObject(result) && 'res_code' in result && 'res_message' in result
+}
+
+export const isICloud189AuthApiResult = (result: any): result is ICloud189AuthApiResult => {
+    return Check.isObject(result) && 'result' in result && 'msg' in result
+}
+
+export const getJSONParse = ()=> superagent.parse['application/json']

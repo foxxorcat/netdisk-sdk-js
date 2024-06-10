@@ -13,7 +13,7 @@ export type ICloud189ApiResult<T = never, Extend = {}> = {
     /**
      * 返回状态 0 为正常
      */
-    res_code: number
+    res_code: number | string
     res_message: string
     data: T
 } & Extend

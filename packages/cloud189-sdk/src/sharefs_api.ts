@@ -2,6 +2,7 @@ import { AxiosRequestConfig } from "axios";
 import { Cloud189Client } from "./client";
 import { ArrayUtil, Method, } from "@netdisk-sdk/utils";
 import { IBoolean, ITime, ITime2, ITimestampMS, IFileListQueryParam, IFileListResult, DeepStringify } from "./types";
+import { WebURL } from "./const";
 
 export class Cloud189SharedFSApi {
     client: Cloud189Client;
@@ -9,29 +10,11 @@ export class Cloud189SharedFSApi {
         this.client = client
     }
 
-    private async post<T, D>(url: string, data?: D, config?: AxiosRequestConfig<D>) {
-        return await this.client.requestWeb<T, D>({
-            method: Method.POST,
-            url,
-            data,
-            ...config
-        })
-    }
-    private async get<T>(url: string, params?: any, config?: AxiosRequestConfig) {
-        return await this.client.requestWeb<T, any>({
-            method: Method.GET,
-            url,
-            params,
-            ...config
-        })
-    }
 
-
-    async getFileDownloadUrl(params: DeepStringify<IGetFileDownloadUrlParam>) {
-        const { data: { fileDownloadUrl } } = await this.get<{ fileDownloadUrl: string }>(
-            "/api/open/file/getFileDownloadUrl.action",
-            { dt: 1, ...params }
-        )
+    async getFileDownloadUrl(params: DeepStringify<IGetFileDownloadUrlParam>): Promise<string> {
+        const { body: { fileDownloadUrl } } = await this.client.agent
+            .get(`${WebURL}/api/open/file/getFileDownloadUrl.action`)
+            .query({ dt: 1, ...params })
         return fileDownloadUrl
     }
 
@@ -53,35 +36,22 @@ export class Cloud189SharedFSApi {
      * @param params 
      * @returns 
      */
-    async listShareDir(params: DeepStringify<IShareQueryParam>) {
-        const { data } = await this.get<IFileListResult<IShareFile, IShareFolder>>(
-            '/api/open/share/listShareDir.action',
-            {
-                // js数字过大精度丢失
+    async listShareDir(params: DeepStringify<IShareQueryParam>): Promise<IFileListResult<IShareFile, IShareFolder>> {
+        const { body } = await this.client.agent
+            .get(`${WebURL}/api/open/share/listShareDir.action`,)
+            .query({
                 'sign-type': 1,
                 shareDirFileId: params.fileId,
                 ...params
-            }
-        )
-        return data
+            })
+        return body
     }
     async *listShareDirIter(params: IShareQueryParam) {
         let [pageNum = 1, pageSize = 100, fileId] = [Number(params.pageNum), Number(params.pageSize), String(params.fileId)]
         let fileListAO: IFileListResult<IShareFile, IShareFolder>['fileListAO']
         do {
-            const resp = await this.get<IFileListResult<IShareFile, IShareFolder>>(
-                '/api/open/share/listShareDir.action',
-                {
-                    ...params,
-                    // js数字过大精度丢失
-                    'sign-type': 1,
-
-                    fileId,
-                    shareDirFileId: fileId,
-                    pageNum: pageNum++
-                }
-            )
-            fileListAO = resp.data.fileListAO
+            const result = await this.listShareDir({ ...params, fileId, pageNum: pageNum++, pageSize })
+            fileListAO = result.fileListAO
 
             if (fileListAO.folderList) yield* fileListAO.folderList
             if (fileListAO.fileList) yield* fileListAO.fileList
@@ -94,12 +64,11 @@ export class Cloud189SharedFSApi {
      * @param shareCode 
      * @returns 
      */
-    async getShareInfoByCode(shareCode: string) {
-        const { data } = await this.get<IShareInfoByCode>(
-            '/api/open/share/getShareInfoByCode.action',
-            { shareCode }
-        )
-        return data
+    async getShareInfoByCode(shareCode: string): Promise<IShareInfoByCode> {
+        const { body } = await this.client.agent
+            .get(`${WebURL}/api/open/share/getShareInfoByCode.action`,)
+            .query({ shareCode })
+        return body
     }
 
     /**
@@ -107,12 +76,11 @@ export class Cloud189SharedFSApi {
      * @param shareCode 
      * @returns 
      */
-    async getShareInfoByCodeV2(shareCode: string) {
-        const { data } = await this.get<IShareInfoByCode>(
-            '/api/open/share/getShareInfoByCodeV2.action',
-            { shareCode }
-        )
-        return data
+    async getShareInfoByCodeV2(shareCode: string): Promise<IShareInfoByCode> {
+        const { body } = await this.client.agent
+            .get(`${WebURL}/api/open/share/getShareInfoByCodeV2.action`,)
+            .query({ shareCode })
+        return body
     }
 
     /**
@@ -122,10 +90,9 @@ export class Cloud189SharedFSApi {
      * @returns 
      */
     async checkAccessCode(shareCode: string, accessCode: string) {
-        const { data: { shareId } } = await this.get<{ shareId: number }>(
-            '/api/open/share/checkAccessCode.action',
-            { shareCode, accessCode }
-        )
+        const { body: { shareId } } = await this.client.agent
+            .get(`${WebURL}/api/open/share/checkAccessCode.action`,)
+            .query({ shareCode, accessCode })
         return Boolean(shareId)
     }
 }

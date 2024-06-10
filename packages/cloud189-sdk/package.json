@@ -14,15 +14,12 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@types/crypto-js": "^4.2.2",
-    "@types/jsrsasign": "^10.5.14",
     "@types/node": "^20.14.0",
-    "@types/uuid": "^9.0.8",
+    "@types/superagent": "^8.1.7",
     "parcel": "^2.12.0"
   },
   "dependencies": {
     "@netdisk-sdk/utils": "workspace:^",
-    "axios": "^1.7.2",
     "err-code": "^3.0.1",
     "superagent": "^9.0.2"
   }

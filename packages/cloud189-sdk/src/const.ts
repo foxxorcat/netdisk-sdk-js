@@ -10,8 +10,9 @@ const WebURL = "https://cloud.189.cn",
 
     PC = "TELEPC",
     ChannelID = "web_cloud.189.cn",
-    ReturnURL = "https://m.cloud.189.cn/zhuanti/2020/loginErrorPc/index.html"
+    ReturnURL = "https://m.cloud.189.cn/zhuanti/2020/loginErrorPc/index.html",
 
+    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
 const clientSuffix = () => ({
     "clientType": PC,
     "version": Version,
@@ -33,5 +34,7 @@ export {
     PC,
     ChannelID,
     ReturnURL,
-    clientSuffix
+    clientSuffix,
+
+    UserAgent
 }

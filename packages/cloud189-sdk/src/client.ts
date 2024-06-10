@@ -1,152 +1,105 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
-import { Await, Check, ContentType, Method, Transform } from '@netdisk-sdk/utils'
-
-import { AccountType, ApiURL, AppID, AuthURL, ClientType, ReturnURL, WebURL, clientSuffix } from "./const";
-import { ICloud189AuthApiResult, IAppSession, IAppToken, ICloud189ApiResult, IEncryptConf, ILoginOptionCommon, ILoginParam, SignType } from "./types";
-import { aseEncrypt, formatDate, rsaEncrypt, signatureV1, signatureV2, sleep, timestamp } from "./helper";
+import superagent, { Agent, Response, Request } from "superagent";
 import errcode from "err-code";
+import { Await, Check, ContentType, Transform } from '@netdisk-sdk/utils'
+
+import { AccountType, ApiURL, AppID, AuthURL, ClientType, ReturnURL, UserAgent, WebURL, clientSuffix } from "./const";
+import { IAppSession, IAppToken, IEncryptConf, ILoginOptionCommon, ILoginParam } from "./types";
+import { aseEncrypt, formatDate, getJSONParse, isICloud189ApiResult, isICloud189AuthApiResult, rsaEncrypt, signatureV2, sleep, timestamp } from "./helper";
 import { Cloud189SharedFSApi } from "./sharefs_api";
 
-// const proxy = {
-//     protocol: 'http',
-//     host: '127.0.0.1',
-//     port: 8888
-// }
-const proxy = void 0
-
 export class Cloud189Client {
-    axios: AxiosInstance;
+    agent: Agent
     source: ITokenSessionSource
     shareApi: Cloud189SharedFSApi
 
-    constructor(source: ITokenSessionSource, axiosInstance?: AxiosInstance) {
+    constructor(source: ITokenSessionSource, agent?: Agent) {
         this.source = source
 
-        this.axios = axiosInstance ?? axios.create({
-            headers: {
-                Accept: "application/json;charset=UTF-8",
-                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
-            },
-            proxy
-        })
+        this.agent = agent ?? superagent.agent()
+            .accept(ContentType.JSON)
+            .set('User-Agent', UserAgent)
+            .ok((resp: Response) => {
+                if (resp.status >= 400) return false
 
-        // 错误处理
-        this.axios.interceptors.response.use(resp => {
-            const data = resp.data
-            if (Check.isObject(data)) {
-                if ('result' in data && data.result != 0) {
-                    // @ts-ignore
-                    return Promise.reject(errcode(new Error(data.msg), { detail: data }))
-                } else if ('res_code' in data && data.res_code != 0) {
-                    // @ts-ignore
-                    return Promise.reject(errcode(new Error(data.res_message), { detail: data }))
+                const body = resp.body
+                if (isICloud189AuthApiResult(body)) {
+                    if (body.result != 0)
+                        throw errcode(new Error('auth api error'), body.msg, { detail: body })
+                } else if (isICloud189ApiResult(body)) {
+                    switch (body.res_code) {
+                        case 0: return true
+                        case 'InvalidSessionKey':
+                            this.source.refreshSession?.(); break
+                        case 'UserInvalidOpenToken':
+                        case 'InvalidAccessToken':
+                            this.source.refreshToken?.(); break
+                        default:
+                            throw errcode(new Error('api error'), body.res_message, { detail: body })
+                    }
                 }
-            }
-            return resp
-        })
+                return true
+            })
+            .use((req: Request) => {
+                const _originalEnd = req.end;
+                req.end = async (callback) => {
+                    const url = req.url
+                    if (url.includes(ApiURL)) {
+                        const { sessionKey, sessionSecret, familySessionKey, familySessionSecret } = await this.source.session()
 
+                        // @ts-ignore
+                        const query = new URLSearchParams(req.qs);
+                        const params = aseEncrypt(sessionSecret.slice(0, 16), query.toString())
+                        // @ts-ignore
+                        req.qs = { params }
+
+                        const method = req.method.toUpperCase()
+                        const session = url.includes('/family') ? { sessionKey: familySessionKey, sessionSecret: familySessionSecret } : { sessionKey, sessionSecret }
+                        const header = signatureV2(method, url, params, session)
+                        req.set(header)
+                    } else if (url.includes(WebURL)) {
+                        const { sessionKey } = await this.source.session()
+                        req.query({ sessionKey })
+                    }
+
+                    req.end = _originalEnd
+                    return req.end(callback)
+                }
+            })
+            .retry(3)
         this.shareApi = new Cloud189SharedFSApi(this)
-    }
-
-    /**
-     * 用与api请求，包含签名加密
-     * @param config 
-     * @param signType 
-     * @returns 
-     */
-    async requestApi<T, D>(config: AxiosRequestConfig<D>, signType: SignType = SignType.V2P) {
-        const url = new URL(config.url || '/', config.baseURL)
-        const searchParams = new URLSearchParams(config.params)
-        const method = config.method?.toUpperCase() || Method.POST
-        const session = await this.source.session()
-
-        let headers = {}
-        if (signType == SignType.V1) {
-            headers = signatureV1(searchParams)
-        } else if (session) {
-            // 加密params参数
-            const params = aseEncrypt(session.sessionSecret.slice(0, 16), searchParams.toString())
-            config.params = { params }
-
-            // 家庭云v2签名
-            if (signType == SignType.V2F) {
-                headers = signatureV2(method, url, params, {
-                    sessionKey: session.familySessionKey,
-                    sessionSecret: session.familySessionSecret
-                })
-            } else if (signType == SignType.V2P) {
-                // 个人云v2签名
-                headers = signatureV2(method, url, params, {
-                    sessionKey: session.sessionKey,
-                    sessionSecret: session.sessionSecret
-                })
-            }
-        }
-
-        const resp = await this.axios.request<T>({
-            baseURL: ApiURL,
-            ...config,
-            method,
-            headers: { ...config.headers, ...headers },
-        })
-        return resp
-    }
-
-    /**
-     * 用于web请求，携带sessionKey
-     * @param config 
-     * @returns 
-     */
-    async requestWeb<T, D>(config: AxiosRequestConfig<D>) {
-        const { sessionKey } = await this.source.session()
-
-        return this.axios.request<T>({
-            baseURL: WebURL,
-            ...config,
-            params: {
-                ...config.params,
-                sessionKey
-            }
-        })
     }
 }
 
 export class Cloud189AuthClient {
-    axios: AxiosInstance;
+    agent: Agent
     encryptConf?: IEncryptConf;
 
-    constructor(axiosInstance?: AxiosInstance) {
-        this.axios = axiosInstance ?? axios.create({
-            headers: {
-                Accept: "application/json;charset=UTF-8",
-                'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
-            },
-            proxy
-        })
-
-        // 错误处理
-        this.axios.interceptors.response.use(resp => {
-            const data = resp.data
-            if (Check.isObject(data)) {
-                if ('result' in data && data.result != 0) {
-                    // @ts-ignore
-                    return Promise.reject(errcode(new Error(data.msg), { detail: data }))
-                } else if ('res_code' in data && data.res_code != 0) {
-                    // @ts-ignore
-                    return Promise.reject(errcode(new Error(data.res_message), { detail: data }))
+    constructor(agent?: Agent) {
+        this.agent = agent ?? superagent.agent()
+            .accept(ContentType.JSON)
+            .set('User-Agent', UserAgent)
+            .ok((resp: Response) => {
+                if (resp.status >= 400) return false
+                if (isICloud189AuthApiResult(resp.body)) {
+                    if (resp.body.result != 0)
+                        throw errcode(new Error('auth api error'), resp.body.msg, { detail: resp.body })
+                } else if (isICloud189ApiResult(resp.body)) {
+                    // res_code == UserInvalidOpenToken accessToken失效
+                    if (resp.body.res_code != 0)
+                        throw errcode(new Error('api error'), resp.body.res_message, { detail: resp.body })
                 }
-            }
-            return resp
-        })
+                return true
+            })
     }
 
     /**
      * @param refreshToken 
      * @returns 
      */
-    async loginByRefreshToken(refreshToken: string): Promise<IAppToken> {
+    async loginByRefreshToken(refreshToken: string): Promise<IAppToken & IAppSession> {
         const appToken = await this.refreshToken(refreshToken)
-        return { ...appToken }
+        const session = await this.getSessionForPC({ accessToken: appToken.accessToken })
+        return { ...appToken, ...session }
     }
 
     /**
@@ -157,14 +110,23 @@ export class Cloud189AuthClient {
      * @param options 
      * @returns 
      */
-    async loginByPassword(loginParam: ILoginParam, username: string, password: string, options: Partial<ILoginOptionCommon> = {}) {
+    async loginByPassword(loginParam: ILoginParam, username: string, password: string, options: Partial<ILoginOptionCommon> = {}): Promise<IAppToken & IAppSession> {
+        delete options['signal']
+
         const rsaUsername = await this.encryptData(username)
         const rsaPassword = await this.encryptData(password)
 
         const { paramID, reqID, lt, captchaToken } = loginParam
-        const { data: result } = await this.axios.post<ICloud189AuthApiResult<never, { toUrl: string }>>(
-            "/api/logbox/oauth2/loginSubmit.do",
-            {
+
+        const { body: result } = await this.agent
+            .post(`${AuthURL}/api/logbox/oauth2/loginSubmit.do`)
+            .type(ContentType.FormUrlencoded)
+            .set({
+                Referer: AuthURL,
+                Reqid: reqID,
+                lt: lt,
+            })
+            .send({
                 appKey: AppID,
                 accountType: AccountType,
                 userName: rsaUsername,
@@ -185,17 +147,7 @@ export class Cloud189AuthClient {
                 isOauth2: "false",
                 state: "",
                 ...options
-            },
-            {
-                baseURL: AuthURL,
-                headers: {
-                    "Content-Type": ContentType.FormUrlencoded,
-                    Referer: AuthURL,
-                    Reqid: reqID,
-                    lt: lt,
-                }
-            }
-        )
+            })
         return await this.getSessionForPC({ redirectURL: result.toUrl })
     }
 
@@ -207,24 +159,23 @@ export class Cloud189AuthClient {
     async loginByCookies(cookies: string) {
         if (!/SSON=([0-9a-z]*)/gi.test(cookies)) throw new Error('Cookies need key SSON')
 
-        let redirectURL: string | undefined
-        const resp = await this.axios.get<string>(
-            "/api/portal/unifyLoginForPC.action",
-            {
-                baseURL: WebURL,
-                params: {
-                    appId: AppID,
-                    clientType: ClientType,
-                    returnURL: ReturnURL,
-                    timeStamp: timestamp(),
-                },
-                headers: { cookie: cookies },
-                beforeRedirect: (options, { statusCode, headers }) => {
-                    options['headers']['cookie'] = cookies
-                    if (statusCode == 302) redirectURL = headers['location']
-                }
-            },
-        )
+        const resp1 = await this.agent
+            .get(`${WebURL}/api/portal/unifyLoginForPC.action`)
+            .query({
+                appId: AppID,
+                clientType: ClientType,
+                returnURL: ReturnURL,
+                timeStamp: timestamp(),
+            })
+            .redirects(0)
+        const location = resp1.headers['location']
+
+        const resp2 = await this.agent
+            .get(location)
+            .set('Cookie', cookies)
+            .redirects(0)
+        const redirectURL = resp2.headers['location']
+
         if (redirectURL == null) throw new Error('login failed,No redirectURL obtained')
         return await this.getSessionForPC({ redirectURL })
     }
@@ -232,8 +183,8 @@ export class Cloud189AuthClient {
     /**
      * 二维码扫描登录
      */
-    async loginByQR(loginParam: ILoginParam, showImage: (image: Uint8Array) => void, options: Partial<ILoginOptionCommon> = {}) {
-        const { paramID } = loginParam
+    async loginByQR(loginParam: ILoginParam, showImage: (image: Uint8Array) => void, options: Partial<ILoginOptionCommon> = {}): Promise<IAppToken & IAppSession> {
+        const { paramID, reqID, lt } = loginParam
         const signal = options.signal
         delete options['signal']
 
@@ -242,28 +193,18 @@ export class Cloud189AuthClient {
             encryuuid: string
             uuid: string
         }
-        const { data: { data: { uuid, encodeuuid, encryuuid } } } = await this.axios.post<ICloud189AuthApiResult<IUUIDResult>>(
-            '/api/logbox/oauth2/getUUID.do',
-            {
-                appId: AppID,
-            },
-            {
-                baseURL: AuthURL,
-                headers: { "Content-Type": ContentType.FormUrlencoded },
-                signal
-            }
-        )
+
+        const { body: { uuid, encodeuuid, encryuuid } } = await this.agent
+            .post(`${AuthURL}/api/logbox/oauth2/getUUID.do`)
+            .type(ContentType.FormUrlencoded)
+            .buffer(true).parse(getJSONParse())
+            .send({ appId: AppID })
 
         // 下载验证码
-        const { data: image } = await this.axios.get<Uint8Array>(
-            '/api/logbox/oauth2/image.do',
-            {
-                baseURL: AuthURL,
-                params: { uuid: encodeuuid },
-                responseType: 'arraybuffer',
-                signal
-            }
-        )
+        const { body: image } = await this.agent
+            .get(`${AuthURL}/api/logbox/oauth2/image.do`)
+            .query({ uuid: encodeuuid, REQID: reqID })
+            .responseType('arraybuffer')
 
         showImage(image)
 
@@ -279,30 +220,31 @@ export class Cloud189AuthClient {
             }
             const timeStamp = timestamp()
             const date = formatDate(new Date(timeStamp))
-            const { data: { status, redirectUrl } } = await this.axios.post<IState>(
-                '/api/logbox/oauth2/qrcodeLoginState.do',
-                {
-                    uuid,
-                    encryuuid,
+
+            const { body: { status, redirectUrl } } = await this.agent
+                .post(`${AuthURL}/api/logbox/oauth2/qrcodeLoginState.do`)
+                .type(ContentType.FormUrlencoded)
+                .set({
+                    Referer: AuthURL,
+                    Reqid: reqID,
+                    lt: lt,
+                })
+                .buffer(true).parse(getJSONParse())
+                .send({
                     appId: AppID,
                     clientType: ClientType,
                     returnUrl: ReturnURL,
                     paramId: paramID,
 
-                    cb_SaveName: "3",
-                    isOauth2: "false",
-                    state: "",
-
-                    timeStamp,
+                    uuid,
+                    encryuuid,
                     date,
+                    timeStamp: timeStamp,
+                    cb_SaveName: 0,
+                    isOauth2: false,
+                    state: '',
                     ...options
-                },
-                {
-                    baseURL: AuthURL,
-                    headers: { "Content-Type": ContentType.FormUrlencoded },
-                    signal
-                }
-            )
+                })
 
             switch (status) {
                 case 0:
@@ -312,6 +254,7 @@ export class Cloud189AuthClient {
                 case -106: // 等待扫描
                 case -11002://等待确认
                     await sleep(1000)
+                    continue
                 default:
                     throw errcode(new Error(`QR code unknown error`), { detail: status })
             }
@@ -327,18 +270,15 @@ export class Cloud189AuthClient {
     async getSessionForPC({ redirectURL, accessToken }: any) {
         if (redirectURL == null && accessToken == null) throw new Error('params is null')
         const params = redirectURL != null ? { redirectURL } : { accessToken, appId: AppID }
-        const { data: result } = await this.axios.post<ICloud189ApiResult<never, IAppSession & IAppToken>>(
-            "/getSessionForPC.action", void 0,
-            {
-                baseURL: ApiURL,
-                headers: { Accept: "application/json;charset=UTF-8" },
-                params: {
-                    appId: AppID,
-                    ...clientSuffix(),
-                    ...params
-                }
-            },
-        )
+
+        const { body: result } = await this.agent
+            .query({
+                appId: AppID,
+                ...clientSuffix(),
+                ...params
+            })
+            .post(`${ApiURL}/getSessionForPC.action`)
+
         result.expiry = new Date(Date.now() + 8640 * 1000).getTime()
         return result
     }
@@ -349,20 +289,17 @@ export class Cloud189AuthClient {
      * docs: https://id.189.cn/html/api_detail_493.html
      * @param refreshToken 
      */
-    async refreshToken(refreshToken: string) {
-        const { data: appToken } = await this.axios.post<IAppToken & { expiresIn: number }>(
-            '/api/oauth2/refreshToken.do',
-            {
+    async refreshToken(refreshToken: string): Promise<IAppToken> {
+        const { body: appToken } = await this.agent
+            .type(ContentType.FormUrlencoded)
+            .buffer(true).parse(getJSONParse())
+            .post(`${AuthURL}/api/oauth2/refreshToken.do`)
+            .send({
                 clientId: AppID,
                 refreshToken: refreshToken,
                 grantType: 'refresh_token',
                 format: 'json',
-            },
-            {
-                baseURL: AuthURL,
-                headers: { "Content-Type": ContentType.FormUrlencoded }
-            }
-        )
+            })
 
         appToken.expiry = new Date(Date.now() + appToken.expiresIn * 1000).getTime()
         return appToken
@@ -372,18 +309,15 @@ export class Cloud189AuthClient {
      * 获取登录所需参数
      */
     async getLoginParam(): Promise<ILoginParam> {
-        const { data: html } = await this.axios.get<string>(
-            "/api/portal/unifyLoginForPC.action",
-            {
-                baseURL: WebURL,
-                params: {
-                    appId: AppID,
-                    clientType: ClientType,
-                    returnURL: ReturnURL,
-                    timeStamp: timestamp(),
-                },
-            },
-        )
+        const { text: html } = await this.agent
+            .query({
+                appId: AppID,
+                clientType: ClientType,
+                returnURL: ReturnURL,
+                timeStamp: timestamp(),
+            })
+            .get(`${WebURL}/api/portal/unifyLoginForPC.action`)
+
         const captchaToken = html.match(`'captchaToken' value='(.+?)'`)![1]
         const lt = html.match(`lt = "(.+?)"`)![1]
         const paramID = html.match(`paramId = "(.+?)"`)![1]
@@ -397,19 +331,14 @@ export class Cloud189AuthClient {
      */
     async needCaptcha(username: string): Promise<boolean> {
         const rsaUsername = await this.encryptData(username)
-
-        const { data: need } = await this.axios.post<string>(
-            "/api/logbox/oauth2/needcaptcha.do",
-            {
+        const { body: need } = await this.agent
+            .type(ContentType.FormUrlencoded)
+            .post(`${AuthURL}/api/logbox/oauth2/needcaptcha.do`)
+            .send({
                 appKey: AppID,
                 accountType: AccountType,
                 userName: rsaUsername,
-            },
-            {
-                baseURL: AuthURL,
-                headers: { 'Content-Type': ContentType.FormUrlencoded }
-            }
-        )
+            })
         return Boolean(Number(need))
     }
 
@@ -418,19 +347,16 @@ export class Cloud189AuthClient {
      * @param loginParam 
      */
     async getCaptchaImage({ captchaToken, reqID }: ILoginParam) {
-        const { data } = await this.axios.get<Uint8Array>(
-            "/api/logbox/oauth2/picCaptcha.do",
-            {
-                baseURL: AuthURL,
-                params: {
-                    "token": captchaToken,
-                    "REQID": reqID,
-                    "rnd": timestamp(),
-                },
-                responseType: 'arraybuffer',
-            }
-        )
-        return data
+        const resp = await this.agent
+            .query({
+                "token": captchaToken,
+                "REQID": reqID,
+                "rnd": timestamp(),
+            })
+            .get(`${AuthURL}/api/logbox/oauth2/picCaptcha.do`)
+            .responseType('arraybuffer')
+
+        return resp.body
     }
 
     /**
@@ -438,19 +364,13 @@ export class Cloud189AuthClient {
      */
     async getEncryptConf(refresh = false): Promise<IEncryptConf> {
         if (this.encryptConf == null || refresh) {
-            const { data: { data: encryptConf } } = await this.axios.post<ICloud189AuthApiResult<IEncryptConf>>(
-                "/api/logbox/config/encryptConf.do",
-                {
-                    appId: AppID
-                },
-                {
-                    baseURL: AuthURL,
-                    headers: {
-                        'Content-Type': ContentType.FormUrlencoded
-                    },
-                },
-            )
-            this.encryptConf = encryptConf
+            const { body: { data: encryptConf } } = await this.agent
+                .type(ContentType.FormUrlencoded)
+                .buffer(true).parse(getJSONParse())
+                .post(`${AuthURL}/api/logbox/config/encryptConf.do`)
+                .send({ appId: AppID })
+
+            this.encryptConf = encryptConf as IEncryptConf
         }
         return this.encryptConf
     }
