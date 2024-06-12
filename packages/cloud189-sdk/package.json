@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@netdisk-sdk/utils": "workspace:^",
-    "err-code": "^3.0.1",
+    "async-await-mutex-lock": "^1.0.11",
+    "error": "^10.4.0",
     "superagent": "^9.0.2"
   }
 }

@@ -1,11 +1,11 @@
-import superagent, { Agent, Response, Request } from "superagent";
-import errcode from "err-code";
-import { Await, Check, ContentType, Transform } from '@netdisk-sdk/utils'
+import superagent, { Agent, Response } from "superagent";
+import { Await, Check, ContentType, ObjectUtil, Transform } from '@netdisk-sdk/utils'
 
 import { AccountType, ApiURL, AppID, AuthURL, ClientType, ReturnURL, UserAgent, WebURL, clientSuffix } from "./const";
 import { IAppSession, IAppToken, IEncryptConf, ILoginOptionCommon, ILoginParam } from "./types";
-import { aseEncrypt, formatDate, getJSONParse, isICloud189ApiResult, isICloud189AuthApiResult, rsaEncrypt, signatureV2, sleep, timestamp } from "./helper";
+import { JSONParse, aseEncrypt, formatDate, rsaEncrypt, signatureV2, sleep, timestamp } from "./helper";
 import { Cloud189SharedFSApi } from "./sharefs_api";
+import { HttpError, InvalidSessionError, InvalidTokenError, QRLoginError, throwError } from "./errors";
 
 export class Cloud189Client {
     agent: Agent
@@ -15,57 +15,65 @@ export class Cloud189Client {
     constructor(source: ITokenSessionSource, agent?: Agent) {
         this.source = source
 
-        this.agent = agent ?? superagent.agent()
+        this.agent = (agent ?? superagent.agent())
             .accept(ContentType.JSON)
             .set('User-Agent', UserAgent)
             .ok((resp: Response) => {
-                if (resp.status >= 400) return false
-
-                const body = resp.body
-                if (isICloud189AuthApiResult(body)) {
-                    if (body.result != 0)
-                        throw errcode(new Error('auth api error'), body.msg, { detail: body })
-                } else if (isICloud189ApiResult(body)) {
-                    switch (body.res_code) {
-                        case 0: return true
-                        case 'InvalidSessionKey':
-                            this.source.refreshSession?.(); break
-                        case 'UserInvalidOpenToken':
-                        case 'InvalidAccessToken':
-                            this.source.refreshToken?.(); break
-                        default:
-                            throw errcode(new Error('api error'), body.res_message, { detail: body })
-                    }
-                }
+                throwError(resp.body || resp.text)
+                if (resp.status >= 400) throw HttpError.create('http request error, status={status}', { status: resp.status })
                 return true
             })
-            .use((req: Request) => {
-                const _originalEnd = req.end;
-                req.end = async (callback) => {
-                    const url = req.url
-                    if (url.includes(ApiURL)) {
-                        const { sessionKey, sessionSecret, familySessionKey, familySessionSecret } = await this.source.session()
+            .use((req: any) => {
+                const source = this.source
+                const oldend = req._end
+                let oldParams: URLSearchParams
 
-                        // @ts-ignore
-                        const query = new URLSearchParams(req.qs);
-                        const params = aseEncrypt(sessionSecret.slice(0, 16), query.toString())
-                        // @ts-ignore
-                        req.qs = { params }
+                // 只有 _end 在重试时才执行 
+                req._end = async function () {
+                    try {
+                        const url = new URL(req.url)
+                        oldParams = oldParams ?? url.searchParams
+                        if (url.origin.includes(ApiURL)) {
+                            const { sessionKey, sessionSecret, familySessionKey, familySessionSecret } = await source.session()
+                            const method = req.method.toUpperCase()
 
-                        const method = req.method.toUpperCase()
-                        const session = url.includes('/family') ? { sessionKey: familySessionKey, sessionSecret: familySessionSecret } : { sessionKey, sessionSecret }
-                        const header = signatureV2(method, url, params, session)
-                        req.set(header)
-                    } else if (url.includes(WebURL)) {
-                        const { sessionKey } = await this.source.session()
-                        req.query({ sessionKey })
+                            const sign = (sessionKey: string, sessionSecret: string) => {
+                                // 加密search
+                                const params = aseEncrypt(sessionSecret.slice(0, 16), oldParams.toString())
+                                url.search = `params=${params}`
+
+                                // 签名header
+                                const header = signatureV2(method, url, params, { sessionKey, sessionSecret })
+
+                                this.url = url.toString()
+                                this.set(header)
+                            }
+                            url.pathname.includes('/family') ? sign(familySessionKey, familySessionSecret) : sign(sessionKey, sessionSecret)
+                        } else if (url.origin.includes(WebURL)) {
+                            const { sessionKey } = await source.session()
+                            url.searchParams.set('sessionKey', sessionKey)
+                            this.url = url.toString()
+                        }
+
+                        // node 额外操作
+                        if (this.req) this.req.path = `${url.pathname}${url.search}`
+                        // if (this.req) {this.req = null;this.req = this.request()}
+                        oldend.call(this)
+                    } catch (error) {
+                        this.callback(error)
                     }
-
-                    req.end = _originalEnd
-                    return req.end(callback)
                 }
             })
-            .retry(3)
+            .retry(3, (_: any, resp: Response) => {
+                try { throwError(resp.body || resp.text) } catch (error) {
+                    if (error instanceof InvalidSessionError) {
+                        source.refreshSession?.()
+                    } else if (error instanceof InvalidTokenError) {
+                        source.refreshToken?.()
+                    } else return void 0  // 由默认机制处理
+                    return true
+                }
+            })
         this.shareApi = new Cloud189SharedFSApi(this)
     }
 }
@@ -75,19 +83,12 @@ export class Cloud189AuthClient {
     encryptConf?: IEncryptConf;
 
     constructor(agent?: Agent) {
-        this.agent = agent ?? superagent.agent()
+        this.agent = (agent ?? superagent.agent())
             .accept(ContentType.JSON)
             .set('User-Agent', UserAgent)
             .ok((resp: Response) => {
-                if (resp.status >= 400) return false
-                if (isICloud189AuthApiResult(resp.body)) {
-                    if (resp.body.result != 0)
-                        throw errcode(new Error('auth api error'), resp.body.msg, { detail: resp.body })
-                } else if (isICloud189ApiResult(resp.body)) {
-                    // res_code == UserInvalidOpenToken accessToken失效
-                    if (resp.body.res_code != 0)
-                        throw errcode(new Error('api error'), resp.body.res_message, { detail: resp.body })
-                }
+                throwError(resp.body || resp.text)
+                if (resp.status >= 400) throw HttpError.create('http request error, status={status}', { status: resp.status })
                 return true
             })
     }
@@ -158,7 +159,7 @@ export class Cloud189AuthClient {
      */
     async loginByCookies(cookies: string) {
         if (!/SSON=([0-9a-z]*)/gi.test(cookies)) throw new Error('Cookies need key SSON')
-
+            
         const resp1 = await this.agent
             .get(`${WebURL}/api/portal/unifyLoginForPC.action`)
             .query({
@@ -169,6 +170,7 @@ export class Cloud189AuthClient {
             })
             .redirects(0)
         const location = resp1.headers['location']
+        if (location == null) throw new Error('prevent redirect fail, header location is null')
 
         const resp2 = await this.agent
             .get(location)
@@ -197,7 +199,7 @@ export class Cloud189AuthClient {
         const { body: { uuid, encodeuuid, encryuuid } } = await this.agent
             .post(`${AuthURL}/api/logbox/oauth2/getUUID.do`)
             .type(ContentType.FormUrlencoded)
-            .buffer(true).parse(getJSONParse())
+            .buffer(true).parse(JSONParse)
             .send({ appId: AppID })
 
         // 下载验证码
@@ -229,7 +231,7 @@ export class Cloud189AuthClient {
                     Reqid: reqID,
                     lt: lt,
                 })
-                .buffer(true).parse(getJSONParse())
+                .buffer(true).parse(JSONParse)
                 .send({
                     appId: AppID,
                     clientType: ClientType,
@@ -250,13 +252,13 @@ export class Cloud189AuthClient {
                 case 0:
                     return await this.getSessionForPC({ redirectURL: redirectUrl })
                 case -11001:// 过期
-                    throw new Error('QR code expired')
+                    throw QRLoginError.create('QR code expired')
                 case -106: // 等待扫描
                 case -11002://等待确认
                     await sleep(1000)
                     continue
                 default:
-                    throw errcode(new Error(`QR code unknown error`), { detail: status })
+                    throw QRLoginError.create('QR code unknown error,status: {status} ', status)
             }
         }
     }
@@ -279,7 +281,7 @@ export class Cloud189AuthClient {
             })
             .post(`${ApiURL}/getSessionForPC.action`)
 
-        result.expiry = new Date(Date.now() + 8640 * 1000).getTime()
+        if (redirectURL) result.expiry = new Date(Date.now() + 8640 * 1000).getTime()
         return result
     }
 
@@ -292,7 +294,7 @@ export class Cloud189AuthClient {
     async refreshToken(refreshToken: string): Promise<IAppToken> {
         const { body: appToken } = await this.agent
             .type(ContentType.FormUrlencoded)
-            .buffer(true).parse(getJSONParse())
+            .buffer(true).parse(JSONParse)
             .post(`${AuthURL}/api/oauth2/refreshToken.do`)
             .send({
                 clientId: AppID,
@@ -366,7 +368,7 @@ export class Cloud189AuthClient {
         if (this.encryptConf == null || refresh) {
             const { body: { data: encryptConf } } = await this.agent
                 .type(ContentType.FormUrlencoded)
-                .buffer(true).parse(getJSONParse())
+                .buffer(true).parse(JSONParse)
                 .post(`${AuthURL}/api/logbox/config/encryptConf.do`)
                 .send({ appId: AppID })
 
@@ -390,18 +392,34 @@ export class Cloud189AuthClient {
         return Check.isArray(data) ? rsaDatas : rsaDatas[0]
     }
 
-    createTokenSessionSource(token: IAppToken | null, tokenSource?: ITokenSource | null, session?: IAppSession | null, sessionSource?: ISessionSource | null): Required<ITokenSessionSource> {
+    /**
+     * 过期自动刷新的TokenSessionSource
+     * @param token 
+     * @param tokenSource 
+     * @param session 
+     * @param sessionSource 
+     * @param update 当session或token刷新时调用，无论成功或失败
+     * @returns 
+     */
+    createTokenSessionSource(
+        token: IAppToken | null,
+        tokenSource?: ITokenSource | null,
+        session?: IAppSession | null,
+        sessionSource?: ISessionSource | null,
+        update?: (token: IAppToken | null, session?: IAppSession | null) => void
+    ) {
         tokenSource = tokenSource ?? {
-            token: async () => {
+            token: () => {
                 if (token?.refreshToken == null) throw new Error('refreshToken is null')
-                const newToken = await this.refreshToken(token.refreshToken)
-                return newToken
+                return this.refreshToken(token.refreshToken)
             },
         }
 
         const refreshToken = async () => {
-            token = (await tokenSource.refreshToken?.()) || (await tokenSource.token())
-            return token
+            try {
+                   token = (await tokenSource.refreshToken?.()) || (await tokenSource.token())
+                   return token
+            } finally { update?.(token, session) }
         }
 
         const getToken = async () => {
@@ -413,28 +431,39 @@ export class Cloud189AuthClient {
 
         sessionSource = sessionSource ?? {
             session: async () => {
-                const token = await getToken()
-                const session = await this.getSessionForPC(token)
+                const { accessToken } = await getToken()
+                const session = await this.getSessionForPC({ accessToken })
                 return session
             }
         }
 
         const refreshSession = async () => {
-            session = (await sessionSource.refreshSession?.()) || (await sessionSource.session())
-            return session
+            // 从源获取新的session
+            const getSession = async () => (await sessionSource.refreshSession?.()) || (await sessionSource.session())
+            try {
+                return session = await getSession()
+            } catch (error: any) {
+                // token 失效，刷新后重试
+                if (error instanceof InvalidTokenError) {
+                    await refreshToken()
+                    return session = await getSession()
+                }
+                throw error
+            } finally { update?.(token, session) }
         }
 
         const getSession = async () => {
-            if (session == null) session = await refreshSession()
+            if (session == null ||
+                session.familySessionKey == null ||
+                session.familySessionSecret == null ||
+                session.sessionKey == null || session.sessionSecret == null) session = await refreshSession()
             return session
         }
 
-        return {
-            token: getToken,
-            refreshToken,
-            session: getSession,
-            refreshSession
-        }
+        return ObjectUtil.createObjectLock<ITokenSessionSource>({
+            token: getToken, refreshToken,
+            session: getSession, refreshSession
+        })
     }
 }
 

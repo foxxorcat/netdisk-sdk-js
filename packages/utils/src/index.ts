@@ -1,5 +1,6 @@
-export * from './is'
+export * from './check'
 export * from './transform'
 export * from './http'
 export * from './types'
 export * from './array'
+export * from './object'

@@ -1,6 +1,5 @@
-import { AxiosRequestConfig } from "axios";
 import { Cloud189Client } from "./client";
-import { ArrayUtil, Method, } from "@netdisk-sdk/utils";
+import { ArrayUtil } from "@netdisk-sdk/utils";
 import { IBoolean, ITime, ITime2, ITimestampMS, IFileListQueryParam, IFileListResult, DeepStringify } from "./types";
 import { WebURL } from "./const";
 

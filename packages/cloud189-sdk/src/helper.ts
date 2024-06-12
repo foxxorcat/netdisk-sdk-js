@@ -1,9 +1,9 @@
-import { Check, Method } from "@netdisk-sdk/utils";
+import { ConstructorArgType, Check, Method } from "@netdisk-sdk/utils";
 
 import Crypto from "crypto";
 import { Buffer } from "buffer";
-import { ICloud189ApiResult, ICloud189AuthApiResult } from "./types";
-import superagent from "superagent";
+import { ICloud189ApiResult, ICloud189ApiResult2, ICloud189AuthApiResult } from "./types";
+import superagent, { Response, CallbackHandler } from "superagent";
 
 export const rsaEncrypt = (publicKey: string, origData: string | Uint8Array) => {
 
@@ -19,14 +19,15 @@ export const aseEncrypt = (key: string, origData: string | Uint8Array): string =
     return ciph.update(Buffer.from(origData)).toString('hex') + ciph.final('hex')
 }
 
-export const signatureV1 = (params: string | URLSearchParams | Record<string, string | readonly string[]>) => {
+
+export const signatureV1 = (params: ConstructorArgType<typeof URLSearchParams>) => {
     const timestampStr = String(timestamp())
     const appKey = "601102120"
-    params = new URLSearchParams(params)
-    params.set("Timestamp", timestampStr)
-    params.set("AppKey", appKey)
-    params.sort()
-    const signature = Crypto.createHash("md5").update(params.toString()).digest("hex")
+    const searchParams = new URLSearchParams(params)
+    searchParams.set("Timestamp", timestampStr)
+    searchParams.set("AppKey", appKey)
+    searchParams.sort()
+    const signature = Crypto.createHash("md5").update(searchParams.toString()).digest("hex")
     return {
         "Signature": signature,
         "Sign-Type": "1",
@@ -82,8 +83,17 @@ export const isICloud189ApiResult = (result: any): result is ICloud189ApiResult 
     return Check.isObject(result) && 'res_code' in result && 'res_message' in result
 }
 
+export const isICloud189ApiResult2 = (result: any): result is ICloud189ApiResult2 => {
+    return Check.isObject(result) && 'errorCode' in result && 'errorMsg' in result
+}
+
 export const isICloud189AuthApiResult = (result: any): result is ICloud189AuthApiResult => {
     return Check.isObject(result) && 'result' in result && 'msg' in result
 }
 
-export const getJSONParse = ()=> superagent.parse['application/json']
+export const JSONParse = (resp: Response, value: string | CallbackHandler) => {
+    const parse = superagent.parse['application/json']
+    // 兼容浏览器和node处理
+    // @ts-ignore
+    return Check.isString(value) ? parse(value) : parse(resp, value)
+}

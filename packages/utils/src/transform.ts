@@ -1,7 +1,5 @@
-import { Check } from "./is";
+import { ArrayUtil } from "./array";
 
 export namespace Transform {
-    export const toArray = <T>(arr: T | T[]): T[] => {
-        return Check.isArray(arr) ? arr : [arr]
-    }
+    export const toArray = ArrayUtil.toArray
 }

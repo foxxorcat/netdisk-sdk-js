@@ -1,21 +1,25 @@
 //  auth api返回
-export type ICloud189AuthApiResult<T = never, Extend = {}> = {
+export type ICloud189AuthApiResult< Extend = {data:any}> = {
     /**
      * 返回状态 0 为正常
      */
     result: number
     msg: string
-    data: T
 } & Extend
 
 // api 返回
-export type ICloud189ApiResult<T = never, Extend = {}> = {
+export type ICloud189ApiResult<Extend = {data:any}> = {
     /**
      * 返回状态 0 为正常
      */
     res_code: number | string
     res_message: string
-    data: T
+} & Extend
+
+export type ICloud189ApiResult2<Extend = {}> = {
+    errorCode: string
+    errorMsg: string
+    success: boolean
 } & Extend
 
 
@@ -120,4 +124,4 @@ export type IBoolean = number
 
 export type DeepStringify<T> = {
     [K in keyof T]: T[K] extends object ? DeepStringify<T[K]> : string | T[K];
-};  
+}; 
