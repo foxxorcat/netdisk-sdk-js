@@ -1,5 +1,3 @@
 packages:
-  - packages/cloud189-sdk
-  - packages/utils
-  - packages/test
+  - packages/*
   - gopeed-extension/*

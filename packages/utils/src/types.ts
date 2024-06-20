@@ -9,3 +9,9 @@ export type AsyncFunction<T> = T extends ((...args: infer Args) => Await<infer R
 export type AsyncObjectMethod<T extends object> = {
     [K in keyof T]: T[K] extends (...args: any) => any ? AsyncFunction<T[K]> : T[K]
 };
+
+/** 数字表示的 boolean */
+export type NBoolean = 0|1
+
+/** 数字表示的标识 */
+export type NFlag = number
