@@ -1,6 +1,6 @@
 {
   "name": "@netdisk-sdk/utils",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "",
   "source": "src/index.ts",
   "main": "dist/index.cjs.js",
@@ -11,8 +11,16 @@
     "build": "parcel build"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "foxxorcat",
+  "homepage": "https://github.com/foxxorcat/netdisk-sdk-js/tree/main/packages/utils",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/foxxorcat/netdisk-sdk-js"
+  },
+  "bugs": {
+    "url": "https://github.com/foxxorcat/netdisk-sdk-js/issues"
+  },
+  "license": "MIT",
   "devDependencies": {
     "parcel": "^2.12.0"
   },
