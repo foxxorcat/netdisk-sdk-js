@@ -2,6 +2,7 @@
   "name": "@types/error",
   "version": "10.4.0",
   "types": "index.d.ts",
+  "private": true,
   "scripts": {
     "build": "tsc node_modules/error/index.js --declaration --allowJs --emitDeclarationOnly --outDir ."
   },

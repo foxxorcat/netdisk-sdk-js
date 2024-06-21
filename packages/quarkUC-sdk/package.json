@@ -1,6 +1,6 @@
 {
   "name": "@netdisk-sdk/quarkuc-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "quark netdisk sdk",
   "source": "src/index.ts",
   "main": "dist/index.cjs.js",
@@ -25,11 +25,11 @@
     "@types/node": "^20.14.1",
     "@types/superagent": "^8.1.7",
     "@types/superagent-prefix": "^0.0.6",
-    "parcel": "^2.12.0"
+    "parcel": "^2.12.0",
+    "@types/error": "workspace:^"
   },
   "dependencies": {
     "@netdisk-sdk/utils": "workspace:^",
-    "@types/error": "workspace:^",
     "error": "^10.4.0",
     "superagent": "^9.0.2",
     "superagent-prefix": "^0.0.2"

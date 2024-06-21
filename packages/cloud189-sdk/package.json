@@ -1,6 +1,6 @@
 {
   "name": "@netdisk-sdk/cloud189-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "cloud189 netdisk sdk",
   "source": "src/index.ts",
   "main": "dist/index.cjs.js",
@@ -24,11 +24,11 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/superagent": "^8.1.7",
-    "parcel": "^2.12.0"
+    "parcel": "^2.12.0",
+    "@types/error": "workspace:^"
   },
   "dependencies": {
     "@netdisk-sdk/utils": "workspace:^",
-    "@types/error": "workspace:^",
     "async-await-mutex-lock": "^1.0.11",
     "error": "^10.4.0",
     "superagent": "^9.0.2"
