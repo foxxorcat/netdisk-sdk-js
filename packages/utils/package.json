@@ -1,6 +1,6 @@
 {
   "name": "@netdisk-sdk/utils",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "",
   "source": "src/index.ts",
   "main": "dist/index.cjs.js",
@@ -22,10 +22,10 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^20.14.1",
     "parcel": "^2.12.0"
   },
   "dependencies": {
-    "@types/node": "^20.14.1",
     "async-await-mutex-lock": "^1.0.11"
   }
 }

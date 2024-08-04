@@ -1,7 +1,7 @@
-import { ArrayUtil, AsyncUtil, Check, NBoolean } from "@netdisk-sdk/utils"
+import { ArrayUtil, AsyncUtil, Check, ContentType, NBoolean } from "@netdisk-sdk/utils"
 import { QuarkUCClient } from "./client"
 import { ICreateTaskResult, IFidExtend, IFile, IFileFid, IQueryPageParam, IQueryPageResult, ITaskStateResult, getFileFid, toSortStr } from "./types"
-
+import OSS from 'ali-oss';
 
 export type IRecordID = Pick<IRecycleFile, 'record_id'>;
 export type IRecordIDExtend = IRecordID | string
@@ -21,7 +21,20 @@ export class QuarkUCFSApi {
     download(file: IFidExtend): Promise<IDownloadResult>
     download(file: IFidExtend[]): Promise<IDownloadResult[]>
     download() { return void 0 as any }
+
+    /**
+     * 
+     */
+    preUpdate(param: IPreUpdateParam): Promise<IPreUpdateResult> { throw '' }
+    hashUpdate(param: IHashUpdateParam): Promise<IHashUpdateResult> { throw '' }
+    finishUpdate(param: IFinishUpdateParam): Promise<IFinishUpdateResult> { throw '' }
+    partUpdate(pre: IPartUpdateParam) { throw '' }
+
     task<E>(taskID: string, _await?: boolean): Promise<ITaskStateResult<E>> { throw '' }
+
+    /************
+     * 回收站管理
+     ***********/
 
     /** 回收站 */
     deepRecycleList(param?: IQueryRecycleListParam): Promise<IQueryRecycleListResult> { throw '' }
@@ -30,9 +43,11 @@ export class QuarkUCFSApi {
     /** 清空回收站 */
     recycleClear(): Promise<void> { throw '' }
     /** 删除指定回收站文件 */
-    recycleRemove(file: IRecordIDExtend | IRecordIDExtend[]): Promise<void> { return void 0 as any }
+    recycleRemove(file: IRecordIDExtend | IRecordIDExtend[]): Promise<void> { throw '' }
     /** 恢复回收站文件 */
     recycleRecover(file: IRecordIDExtend | IRecordIDExtend[]): Promise<ICreateTaskResult> { throw '' }
+
+
 }
 
 export type IQuerySortParam = Partial<IQueryPageParam<{
@@ -79,7 +94,7 @@ export type IMkderParam = Partial<{
     pdir_fid: string,
     dir_path: string
 }>;
-QuarkUCFSApi.prototype.mkdir = async function (file_name: string, params: IMkderParam={}) {
+QuarkUCFSApi.prototype.mkdir = async function (file_name: string, params: IMkderParam = {}) {
     const { body: { data } } = await this.client.agentApi.post('/file')
         .send({
             file_name,
@@ -119,6 +134,131 @@ QuarkUCFSApi.prototype.download = async function (files) {
     return ArrayUtil.isArray(files) ? data : data[0]
 }
 
+export type IPreUpdateParam = {
+    /** 父目录id */
+    pdir_fid: string,
+    dir_name?: string,
+
+    file_name: string,
+    size: number,
+    /** mime 类型 */
+    format_type: string,
+    /** 时间戳（毫秒） */
+    l_updated_at?: number,
+    /** 时间戳（毫秒） */
+    l_created_at?: number
+    ccp_hash_update?: boolean,
+    /** 并行上传 */
+    parallel_upload?: boolean,
+};
+export type IPreUpdateResult = {
+    task_id: string,
+    upload_id: string,
+    obj_key: string,
+    upload_url: string,
+    fid: string,
+    bucket: string,
+    callback: {
+        callbackUrl: string,
+        callbackBody: string
+    },
+    format_type: string,
+    size: number,
+    auth_info: string,
+    auth_info_expried: number,
+    file_struct: {
+        platform_source: string
+    }
+    finish: false
+};
+QuarkUCFSApi.prototype.preUpdate = async function (param) {
+    const now = Date.now()
+    const { body: { data } } = await this.client.agentApi
+        .post('/file/upload/pre')
+        .send({
+            parallel_upload: true,
+            ccp_hash_update: true,
+            dir_name: '',
+            l_updated_at: now,
+            l_created_at: now,
+            ...param
+        })
+    return data
+}
+
+export type IHashUpdateParam = {
+    /** 文件完整md5 */
+    md5?: string;
+    /** 文件完整sha1 */
+    sha1: string;
+    task_id: string
+}
+export type IHashUpdateResult = {
+    finish: true,
+    obj_key: string,
+    fid: string,
+    format_type: string,
+    thumbnail?: string,
+    preview_url?: string,
+    path_fid_map: any
+} | { finish: false };
+QuarkUCFSApi.prototype.hashUpdate = async function (param) {
+    const { body: { data } } = await this.client.agentApi
+        .post('/file/update/hash')
+        .send({ md5: 'd41d8cd98f00b204e9800998ecf8427e', ...param })
+    return data
+}
+export type IFinishUpdateParam = {
+    obj_key: string,
+    task_id: string
+}
+export type IFinishUpdateResult = {
+    task_id: string,
+    obj_key: string,
+    fid: string,
+    pdir_fid: string,
+    file_name: string,
+    md5: string,
+    sha1: string,
+    thumbnail?: string,
+    preview_url?: string,
+    format_type: string,
+    size: number,
+    file_struct: { platform_source: string }
+    finish: true,
+};
+QuarkUCFSApi.prototype.finishUpdate = async function (param) {
+    const { body: { data } } = await this.client.agentApi
+        .post('/file/update/finish')
+        .send(param)
+    return data
+}
+
+export type IPartUpdateParam = Pick<IPreUpdateResult, 'bucket' | 'upload_url' | 'obj_key' | 'callback'> & {
+
+};
+QuarkUCFSApi.prototype.partUpdate = async function (param) {
+    const { bucket, upload_url: endpoint, obj_key, callback } = param
+    // const auth_meta = `PUT\n\n${format_type}`
+    const client = new OSS({
+        bucket: bucket,
+        accessKeyId: "null",
+        accessKeySecret: "null",
+        endpoint: endpoint.replace("http://", "https://"),
+        // @ts-ignore
+        authorization: (e, r) => {
+            console.log(e, r)
+        },
+    })
+    const res = await client.multipartUpload(obj_key, new Uint8Array(0), {
+        callback: {
+            url: callback.callbackUrl,
+            body: callback.callbackBody
+        }
+    })
+}
+
+
 QuarkUCFSApi.prototype.task = async function (task_id, _await = false) {
     let retry_index = 0
     let result: ITaskStateResult
@@ -131,9 +271,9 @@ QuarkUCFSApi.prototype.task = async function (task_id, _await = false) {
     return result as any
 }
 
-/**
+/************
  * 回收站api
- */
+ ************/
 
 export type IQueryRecycleListParam = Partial<IQueryPageParam<{
 

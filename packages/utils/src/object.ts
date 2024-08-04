@@ -24,6 +24,11 @@ export namespace ObjectUtil {
         return true
     }
 
+    export const bindObject = <T, K extends keyof T>(obj: T, method: K): T[K] => {
+        if (Check.isFunction(obj[method])) return obj[method].bind(obj)
+        return obj[method]
+    }
+
     /**
      * 给对象中的方法增加互斥锁
      * @param obj 

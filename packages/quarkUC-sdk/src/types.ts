@@ -9,7 +9,7 @@ export type IQuarkUCApiResult<T = never, Extend = {}> = {
 } & Extend
 
 export const isIQuarkUCApiResult = (o: any): o is IQuarkUCApiResult => {
-    return typeof o == 'object' && 'code' in o && 'message' in o
+    return Check.isObject(o) && 'code' in o && 'message' in o
 }
 
 export type ICreateTaskResult = {

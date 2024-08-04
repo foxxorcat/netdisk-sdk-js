@@ -11,7 +11,10 @@ export type AsyncObjectMethod<T extends object> = {
 };
 
 /** 数字表示的 boolean */
-export type NBoolean = 0|1
+export type NBoolean = 0 | 1
 
 /** 数字表示的标识 */
 export type NFlag = number
+
+/** 同时支持数字和字符串 */
+export type StringNumber = string | number

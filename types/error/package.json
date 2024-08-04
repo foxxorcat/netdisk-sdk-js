@@ -8,6 +8,7 @@
   },
   "keywords": [],
   "devDependencies": {
+    "@types/node": "^20.14.12",
     "error": "^10.4.0",
     "typescript": "^5.4.5"
   }
