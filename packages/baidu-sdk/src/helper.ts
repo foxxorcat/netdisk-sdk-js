@@ -30,3 +30,5 @@ export const getFileTime = (file: IFile) => {
     const ctime = file.ctime ?? file.local_ctime ?? file.server_ctime
     return { mtime, ctime }
 }
+
+export const replaceUrl = (u: string, cond: boolean = true) => cond ? u.replace("d.pcs.baidu.com", "bjbgp01.baidupcs.com") : u
