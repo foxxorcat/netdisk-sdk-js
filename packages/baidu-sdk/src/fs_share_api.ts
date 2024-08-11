@@ -12,7 +12,7 @@ export const parseShareParam = (_url: string | URL): IShareParam | null => {
         if (shorturl != "") return { shorturl, pwd }
     } else if (url.pathname.startsWith('/share/init')) {
         const shorturl = url.searchParams.get('surl')
-        if (shorturl != null) return { shorturl, pwd }
+        if (shorturl != null) return { shorturl: '1' + shorturl, pwd }
 
         const shareid = url.searchParams.get('shareid')
         const uk = url.searchParams.get('uk')
