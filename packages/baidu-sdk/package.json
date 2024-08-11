@@ -1,6 +1,6 @@
 {
   "name": "@netdisk-sdk/baidu-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "baidu netdisk sdk",
   "source": "src/index.ts",
   "main": "dist/index.cjs.js",

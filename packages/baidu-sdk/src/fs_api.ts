@@ -24,8 +24,10 @@ export class BaiduFSApi {
      * 
      */
 
+    gettemplatevariable<T extends string>(k: T[]): Promise<Record<T, unknown>> { throw '' }
+
     /** 下载地址获取 */
-    filemetas(param: IFileMetasParam): Promise<IFileMetasResult> { throw '' }
+    filemetas(param: IFileMetasParam, ua?: string): Promise<IFileMetasResult> { throw '' }
     list(param: IListParam): Promise<IListResult> { throw '' }
     /** 查询文件列表 */
     listall(param: IListParam<IListAllExtend>): Promise<IListResult> { throw '' }
@@ -56,6 +58,12 @@ export class BaiduFSApi {
     taskquery(taskId: string): Promise<ITaskQueryResult> { throw '' }
 }
 
+BaiduFSApi.prototype.gettemplatevariable = async function (fields) {
+    const { body: { result } } = await this.request(Method.GET, '/api/gettemplatevariable').query({
+        fields: JSON.stringify(fields)
+    })
+    return result
+}
 
 export type IFileMetasParam<Extend = {}> = {
     /** 文件路径 */
@@ -88,14 +96,16 @@ export type IFileMeta<Extend = Record<string, any>> = {
     size: number;
 } & Extend;
 export type IFileMetasResult = ResultInfo<IFileMeta, {}>;
-BaiduFSApi.prototype.filemetas = async function (param) {
+BaiduFSApi.prototype.filemetas = async function (param, ua = 'netdisk') {
     const target = JSON.stringify(param.target)
-    const { body: filemetas } = await this.request(Method.GET, '/api/filemetas').query({
-        // web: "5",
-        // origin: "dlna",
-        ...param,
-        target,
-    })
+    const { body: filemetas } = await this.request(Method.GET, '/api/filemetas')
+        .set({ 'user-agent': ua })
+        .query({
+            // web: "5",
+            // origin: "dlna",
+            ...param,
+            target,
+        })
     return filemetas
 }
 
@@ -172,8 +182,8 @@ export type IFileManagerResult = {
     info: Record<string, any>[]
 };
 BaiduFSApi.prototype.filemanager = async function (opera, param) {
-     // @ts-ignore
-     if ('filelist' in param) param.filelist = JSON.stringify(param.filelist)
+    // @ts-ignore
+    if ('filelist' in param) param.filelist = JSON.stringify(param.filelist)
     const { body } = await this.request(Method.POST, '/api/filemanager').query({ opera })
         .type(ContentType.FormUrlencoded)
         .send(param)

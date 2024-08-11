@@ -4,13 +4,13 @@ export type IBaiduResult<Extend = {}> = {
     errno: number | 0
     errmsg?: string
 
-    request_id: number | string
+    request_id?: number | string
 
     show_msg?: string
 } & Extend
 
 export const isIBaiduResult = (o: any): o is IBaiduResult => {
-    return Check.isObject(o) && 'errno' in o && 'request_id' in o
+    return Check.isObject(o) && 'errno' in o
 }
 
 export type IBaiduResult2<Extend = {}> = {
@@ -40,10 +40,10 @@ export interface IFile {
     md5: string
 
     /** 创建数据， 时间戳（秒） */
-    ctime?: number;local_ctime?:number;server_ctime?:number
+    ctime?: number; local_ctime?: number; server_ctime?: number
     /** 修改数据， 时间戳（秒） */
-    mtime?: number;local_mtime?:number;server_mtime?:number
-    
+    mtime?: number; local_mtime?: number; server_mtime?: number
+
     category: FileCategory
     thumbs?: Record<string, string>[]
 }
