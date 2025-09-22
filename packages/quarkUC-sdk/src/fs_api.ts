@@ -1,7 +1,8 @@
 import { ArrayUtil, AsyncUtil, Check, ContentType, NBoolean } from "@netdisk-sdk/utils"
 import { QuarkUCClient } from "./client"
 import { ICreateTaskResult, IFidExtend, IFile, IFileFid, IQueryPageParam, IQueryPageResult, ITaskStateResult, getFileFid, toSortStr } from "./types"
-import OSS from 'ali-oss';
+import { HttpError } from "./errors";
+// import OSS from 'ali-oss';
 
 export type IRecordID = Pick<IRecycleFile, 'record_id'>;
 export type IRecordIDExtend = IRecordID | string
@@ -13,7 +14,7 @@ export class QuarkUCFSApi {
         this.client = client
     }
 
-    sort(param?: IQuerySortParam): Promise<IFile> { throw '' }
+    sort(param?: IQuerySortParam): Promise<IQueryPageResult<IFile>> { throw '' }
     info(file: IFidExtend, param?: { _fetch_full_path?: number }): Promise<IFile> { throw '' }
     rename(file: IFidExtend, newName: string): Promise<void> { throw '' }
     mkdir(name: string, param?: IMkderParam): Promise<IFile> { throw '' }
@@ -28,8 +29,8 @@ export class QuarkUCFSApi {
     preUpdate(param: IPreUpdateParam): Promise<IPreUpdateResult> { throw '' }
     hashUpdate(param: IHashUpdateParam): Promise<IHashUpdateResult> { throw '' }
     finishUpdate(param: IFinishUpdateParam): Promise<IFinishUpdateResult> { throw '' }
-    partUpdate(pre: IPartUpdateParam) { throw '' }
-
+    partUpdate(pre: IPartUpdateParam, partNumber: number, data: Uint8Array): Promise<string> { throw '' }
+    upCommit(pre: IPartUpdateParam, md5s: string[]) { throw '' }
     task<E>(taskID: string, _await?: boolean): Promise<ITaskStateResult<E>> { throw '' }
 
     /************
@@ -234,30 +235,80 @@ QuarkUCFSApi.prototype.finishUpdate = async function (param) {
     return data
 }
 
-export type IPartUpdateParam = Pick<IPreUpdateResult, 'bucket' | 'upload_url' | 'obj_key' | 'callback'> & {
+export type IPartUpdateParam = Pick<IPreUpdateResult, 'format_type' | 'upload_id' | 'bucket' | 'upload_url' | 'obj_key' | 'callback' | 'auth_info' | 'task_id'> & {
 
 };
-QuarkUCFSApi.prototype.partUpdate = async function (param) {
-    const { bucket, upload_url: endpoint, obj_key, callback } = param
-    // const auth_meta = `PUT\n\n${format_type}`
-    const client = new OSS({
-        bucket: bucket,
-        accessKeyId: "null",
-        accessKeySecret: "null",
-        endpoint: endpoint.replace("http://", "https://"),
-        // @ts-ignore
-        authorization: (e, r) => {
-            console.log(e, r)
-        },
-    })
-    const res = await client.multipartUpload(obj_key, new Uint8Array(0), {
-        callback: {
-            url: callback.callbackUrl,
-            body: callback.callbackBody
-        }
-    })
+QuarkUCFSApi.prototype.partUpdate = async function (param, partNumber, data) {
+    const { format_type, bucket, upload_id, obj_key, upload_url } = param
+    const ua = `aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit`
+    const timeStr = new Date().toUTCString()
+    const auth_meta = `PUT
+
+${format_type}
+${timeStr}
+x-oss-date:${timeStr}
+x-oss-user-agent:${ua}
+/${bucket}/${obj_key}?partNumber=${partNumber}&uploadId=${upload_id}`
+
+    const { auth_info, task_id } = param
+    const { body: { data: { auth_key } } } = await this.client.agentApi.post('/file/upload/auth').send({ auth_info, auth_meta, task_id })
+
+    const result = await this.client.agent.put(`https://${bucket}.${upload_url.substring(7)}/${obj_key}`)
+        .set({
+            "Authorization": auth_key,
+            "Content-Type": format_type,
+            "x-oss-date": timeStr,
+            "x-oss-user-agent": ua,
+        }).query({
+            partNumber,
+            uploadId: upload_id
+        }).send(data)
+
+    if (result.status != 200) throw HttpError.create(`up status: ${result.status}, error: ${result.text}`)
+    return result.headers['etag']
 }
 
+import crypto from 'crypto';
+import { Buffer } from 'buffer';
+QuarkUCFSApi.prototype.upCommit = async function (param, md5s) {
+    const { auth_info, task_id, bucket, obj_key, upload_id, callback, upload_url } = param;
+    const ua = `aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit`
+    const timeStr = new Date().toUTCString()
+    const body = `<?xml version="1.0" encoding="UTF-8"?>
+${md5s.map((md5, index) => `<Part>
+<PartNumber>${index + 1}</PartNumber>
+<ETag>${md5}</ETag>
+</Part>` )}
+<CompleteMultipartUpload>`
+    const contentMD5 = crypto.hash('md5', body, 'hex')
+    const callbackBase64 = Buffer.from(JSON.stringify(callback)).toString('base64')
+    const auth_meta = `POST
+
+${contentMD5}
+application/xml
+${timeStr}
+x-oss-callback:${callbackBase64}
+x-oss-date:${timeStr}
+x-oss-user-agent:${ua}
+/${bucket}/${obj_key}?uploadId=${upload_id}`
+
+    const { body: { data: { auth_key } } } = await this.client.agentApi.post('/file/upload/auth').send({ auth_info, auth_meta, task_id })
+
+    const result = await this.client.agent.post(`https://${bucket}.${upload_url.substring(7)}/${obj_key}`)
+        .set({
+            "Authorization": auth_key,
+            "Content-MD5": contentMD5,
+            "Content-Type": "application/xml",
+            "x-oss-callback": callbackBase64,
+            "x-oss-date": timeStr,
+            "x-oss-user-agent": ua,
+        })
+        .query({ uploadId: upload_id })
+        .send(auth_meta)
+
+    if (result.status != 200) throw HttpError.create(`up status: ${result.status}, error: ${result.text}`)
+    return null
+}
 
 QuarkUCFSApi.prototype.task = async function (task_id, _await = false) {
     let retry_index = 0
