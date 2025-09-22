@@ -20,20 +20,22 @@ const defaultHasMore = (result: any): boolean => {
     return result != null && defaultTransferFile(result).length > 0
 }
 
-export const createListIter = <ListParam, ListResult, IFile = ExtractFile<ListResult>, FPage extends string = 'page'>(
+export const createListIter = <ListParam, ListResult, IFile = ExtractFile<ListResult>, FPage extends (keyof ListParam | 'page' | string) = 'page'>(
     list: (param: ListParam) => Await<ListResult>,
     option: {
         /** 分页、偏移使用的字段 */
         pageField?: FPage,
-        /** 使用偏移，而不是分页 @default pageField != 'page' */
+        /** 使用偏移，而不是分页 @default !pageField.includes('page')*/
         offsetFlag?: boolean
+        /** 获取返回值中的file */
         transferFile?: (result: ListResult) => IFile[],
+        /** 是否还存在数据 */
         hasMore?: (result: ListResult) => boolean,
     } = {}
 ): ((param: ListParam & { [K in FPage]?: never }) => AsyncGenerator<IFile>) => {
     const {
         pageField = "page",
-        offsetFlag = pageField != "page",
+        offsetFlag = !(pageField as string).includes('page'),
         transferFile = defaultTransferFile,
         hasMore = defaultHasMore
     } = option
@@ -45,43 +47,51 @@ export const createListIter = <ListParam, ListResult, IFile = ExtractFile<ListRe
                 [pageField]: offsetFlag ? count : page
             } as any)
 
-            for (const file of transferFile(result)) {
+            const files = transferFile(result)
+            for (const file of files) {
                 yield file
                 count++
             }
 
-            if (!hasMore(result)) break
+            if (!hasMore(result) || files.length === 0) break
         }
     }
 }
 
-export const createWalkIter = <Param, IFile>(
+export const createWalkIter = <Param, IFile, Extend = Record<string, any>>(
     fileIter: (param: Param) => AsyncIterable<IFile>,
     option: {
         /** 获取下一层参数 */
         getNextParam: (file: IFile, param: Param) => Param | null,
-        /** 进入目录深度 @default Infinity */
+        transferFile?: (pfile: IFile & Extend | null, file: IFile) => IFile & Extend,
+        /** 进入目录深度 @default Infinity (<=0 时不做限制) */
         deep?: number,
-        /** 最多获取数量 @default Infinity */
+        /** 最多获取数量 @default Infinity (<=0 时不做限制) */
         maxcount?: number
     }
 ) => {
-    const { getNextParam, deep = Infinity, maxcount = Infinity } = option
+    // 默认值设为 0，然后在下面进行判断
+    let { getNextParam, transferFile, deep = 0, maxcount = 0 } = option
+
+    // 当 deep 或 maxcount 小于等于 0 时，视为没有限制
+    if (deep <= 0) deep = Infinity;
+    if (maxcount <= 0) maxcount = Infinity;
 
     let currenCount = 0
-    const walk = async function* (param: Param, currenDeep: number): AsyncIterable<IFile> {
+    const walk = async function* (pfile: IFile & Extend | null, param: Param, currenDeep: number): AsyncIterable<IFile & Extend> {
         for await (const file of fileIter(param)) {
             if (++currenCount > maxcount) {
                 break
             }
 
-            yield file
+            const newFile = transferFile?.(pfile, file) || file as any
+            yield newFile
 
-            const folderParam = getNextParam(file, param)
+            const folderParam = getNextParam(newFile, param)
             if (folderParam != null && currenDeep < deep) {
-                yield* walk(folderParam, currenDeep + 1)
+                yield* walk(newFile, folderParam, currenDeep + 1)
             }
         }
     }
-    return (param: Param) => walk(param, 0)
+    return (param: Param) => walk(null, param, 0)
 }

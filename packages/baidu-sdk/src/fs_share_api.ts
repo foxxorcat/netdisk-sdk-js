@@ -3,6 +3,7 @@ import { BaiduClient } from "./client"
 import { IListParam } from "./fs_api";
 import { Request } from 'superagent';
 import { IFile } from "./types";
+import { generateSharedownloadSign, Android } from "./helper";
 
 export const parseShareParam = (_url: string | URL): IShareParam | null => {
     const url = new URL(_url)
@@ -39,6 +40,8 @@ export class BaiduShareFSApi {
     wxlist(param: IListShareParam): Promise<IListShareResult> { throw '' }
 
     transfer(param: ITransferShareParam, savePath: string, ...fsid: StringNumber[]): Promise<ITransferShareResult> { throw '' }
+
+    sharedownload(param: IShareDownloadParam): Promise<IShareDownloadResult> { throw '' }
 }
 
 export type IShareParam = { pwd?: string, } & ({ shorturl: string } | { shareid: StringNumber, uk: StringNumber })
@@ -117,3 +120,57 @@ BaiduShareFSApi.prototype.transfer = async function (param, path, ...fsids) {
         .send({ path, fsidlist })
     return body
 }
+
+export type IShareDownloadParam = {
+    uk: StringNumber,
+    shareid: StringNumber,
+    sekey: string,
+    fsid_list: StringNumber[],
+};
+
+export type IShareDownloadResult = {
+    errno: number;
+    list: IFile[] & { dlink: string };
+};
+
+BaiduShareFSApi.prototype.sharedownload = async function (param: IShareDownloadParam) {
+    if (typeof this.client.source !== 'string' || !this.client.bduss || !this.client.uid || !this.client.androidChannel.sk) {
+        throw new Error('sharedownload is only supported when using cookie-based authentication and user details (uid, sk) are available.');
+    }
+
+    const { uk, shareid, sekey, fsid_list } = param;
+    const { bduss, uid, androidChannel: { sk } } = this.client;
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const timestamp_ms = timestamp * 1000;
+
+    const post_data_items = [
+        ["encrypt", "0"],
+        ["uk", uk],
+        ["product", "share"],
+        ["primaryid", shareid],
+        ["fid_list", JSON.stringify(fsid_list)],
+        ["extra", JSON.stringify({ sekey: decodeURIComponent(sekey) })],
+    ];
+
+    const post_body_string = post_data_items.map(([k, v]) => `${k}=${v}`).join('&');
+
+    const sign = generateSharedownloadSign(post_body_string, Android.DEVICE_ID, timestamp);
+    const rand = Android.calculateRand(timestamp_ms, bduss, uid, sk);
+
+    const { body } = await this.request(Method.POST, '/api/sharedownload')
+        .query({
+            sign: sign,
+            timestamp: timestamp,
+            rand: rand,
+            time: timestamp_ms,
+            devuid: Android.DEVICE_ID,
+            channel: Android.CHANNEL,
+            clienttype: Android.CLIENT_TYPE,
+            version: Android.APP_VERSION,
+        })
+        .type(ContentType.FormUrlencoded)
+        .send(post_body_string);
+
+    return body;
+};

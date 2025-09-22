@@ -24,7 +24,7 @@ export class BaiduFSApi {
      * 
      */
 
-    gettemplatevariable<T extends string>(k: T[]): Promise<Record<T, unknown>> { throw '' }
+    // gettemplatevariable<T extends string>(k: T[]): Promise<Record<T, unknown>> { throw '' }
 
     /** 下载地址获取 */
     filemetas(param: IFileMetasParam, ua?: string): Promise<IFileMetasResult> { throw '' }
@@ -58,12 +58,12 @@ export class BaiduFSApi {
     taskquery(taskId: string): Promise<ITaskQueryResult> { throw '' }
 }
 
-BaiduFSApi.prototype.gettemplatevariable = async function (fields) {
-    const { body: { result } } = await this.request(Method.GET, '/api/gettemplatevariable').query({
-        fields: JSON.stringify(fields)
-    })
-    return result
-}
+// BaiduFSApi.prototype.gettemplatevariable = async function (fields) {
+//     const { body: { result } } = await this.request(Method.GET, '/api/gettemplatevariable').query({
+//         fields: JSON.stringify(fields)
+//     })
+//     return result
+// }
 
 export type IFileMetasParam<Extend = {}> = {
     /** 文件路径 */
