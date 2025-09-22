@@ -25,6 +25,7 @@ export namespace ObjectUtil {
     }
 
     export const bindObject = <T, K extends keyof T>(obj: T, method: K): T[K] => {
+        // @ts-ignore
         if (Check.isFunction(obj[method])) return obj[method].bind(obj)
         return obj[method]
     }
